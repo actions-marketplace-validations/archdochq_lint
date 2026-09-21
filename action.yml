@@ -63,6 +63,12 @@ runs:
       run: |
         set -uo pipefail
 
+        # Not -e. GitHub starts this shell with it, and set -uo does not turn
+        # it off, so lint exiting 2 killed the script on that line: no
+        # annotations, no count, and a step that still exited 2 and therefore
+        # looked correct from outside.
+        set +e
+
         # A finding's path is relative to root, and an annotation's has to be
         # relative to the workspace. With a root of "docs", or a specification
         # in a subdirectory, the two differ and every annotation would land on

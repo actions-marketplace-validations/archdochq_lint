@@ -54,9 +54,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "outcome=${{ steps.broken.outcome }} findings=${{ steps.broken.outputs.findings }}"
+          found='${{ steps.broken.outputs.findings }}'
+          echo "outcome=${{ steps.broken.outcome }} findings=$found"
           [ "${{ steps.broken.outcome }}" = "failure" ]
-          [ "${{ steps.broken.outputs.findings }}" != "0" ]
+          # -gt rather than != 0, which an unset output satisfies. It did:
+          # the step died before setting it and the assertion passed anyway.
+          [ -n "$found" ] && [ "$found" -gt 0 ]
 
   # A version asked for is installed whatever is already there, and an archdoc
   # already present is left alone. Both halves, because either one passing
