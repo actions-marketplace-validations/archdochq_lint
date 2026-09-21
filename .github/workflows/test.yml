@@ -93,3 +93,24 @@ jobs:
         run: |
           set -euo pipefail
           [ "$(archdoc --version)" = "v0.1.0" ]
+
+  # The README tells people to write archdochq/lint@v1, which resolves this
+  # action from the tag rather than from the checkout, and resolves
+  # archdochq/setup from its tag in turn. Same code, two resolution paths that
+  # the jobs above never exercise, and this is the form everyone actually uses.
+  tagged:
+    name: as archdochq/lint@v1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: clean
+        uses: archdochq/lint@v1
+        with:
+          path: fixtures/clean
+      - shell: bash
+        run: |
+          set -euo pipefail
+          [ "${{ steps.clean.outputs.findings }}" = "0" ]
