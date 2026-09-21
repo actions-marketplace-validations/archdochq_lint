@@ -1,0 +1,7 @@
+{
+  "name": "Clean",
+  "branch": "main",
+  "root": ".",
+  "strict": true,
+  "ref_stale_days": 180
+}

@@ -1,0 +1,111 @@
+name: ArchDoc lint
+description: Check a specification repository and annotate every finding on the diff.
+author: ArchDoc
+
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  version:
+    description: >
+      The archdoc release to use. Left empty, whatever archdoc is already on
+      PATH is used, and the latest release is installed only if there is none,
+      so a workflow that built the binary itself keeps the one it built. Given
+      a value, that release is installed whatever is already there.
+    required: false
+    default: ''
+  path:
+    description: The directory to run in, as archdoc -C takes it.
+    required: false
+    default: '.'
+  strict-warnings:
+    description: Treat warnings as failures.
+    required: false
+    default: 'false'
+
+outputs:
+  findings:
+    description: How many findings were reported.
+    value: ${{ steps.lint.outputs.findings }}
+
+runs:
+  using: composite
+  steps:
+    - id: decide
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # An explicit version is always honoured, so a request is never
+        # silently ignored. With none, an archdoc already on PATH is left
+        # alone: ArchDoc's own repository builds the binary from the commit
+        # under test and must not have a release laid over it.
+        if [ -n "$REQUESTED" ]; then
+          echo "install=true" >> "$GITHUB_OUTPUT"
+        elif command -v archdoc > /dev/null 2>&1; then
+          echo "install=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "install=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - if: steps.decide.outputs.install == 'true'
+      uses: archdochq/setup@v1
+      with:
+        version: ${{ inputs.version || 'latest' }}
+
+    - id: lint
+      shell: bash
+      env:
+        ARCHDOC_PATH: ${{ inputs.path }}
+        STRICT: ${{ inputs.strict-warnings }}
+      run: |
+        set -uo pipefail
+
+        # A finding's path is relative to root, and an annotation's has to be
+        # relative to the workspace. With a root of "docs", or a specification
+        # in a subdirectory, the two differ and every annotation would land on
+        # a file that does not exist.
+        directory="$(cd "$ARCHDOC_PATH" && pwd)"
+        while [ ! -f "$directory/archdoc.json" ] && [ "$directory" != "/" ]; do
+          directory="$(dirname "$directory")"
+        done
+        if [ ! -f "$directory/archdoc.json" ]; then
+          echo "::error::no archdoc.json found in $ARCHDOC_PATH or any parent directory"
+          exit 1
+        fi
+        root="$(jq -r '.root // "."' "$directory/archdoc.json")"
+        base="$(cd "$directory/$root" && pwd)"
+        prefix=""
+        case "$base" in
+          "$GITHUB_WORKSPACE") prefix="" ;;
+          "$GITHUB_WORKSPACE"/*) prefix="${base#"$GITHUB_WORKSPACE"/}/" ;;
+        esac
+
+        findings="$RUNNER_TEMP/archdoc-findings.json"
+        if [ "$STRICT" = "true" ]; then
+          archdoc -C "$ARCHDOC_PATH" lint --json --strict-warnings > "$findings"
+        else
+          archdoc -C "$ARCHDOC_PATH" lint --json > "$findings"
+        fi
+        status=$?
+
+        # Exit 1 is a usage or validation failure, which printed a message
+        # rather than a findings array, so there is nothing to annotate.
+        if [ "$status" = "1" ]; then
+          exit 1
+        fi
+
+        count="$(jq 'length' "$findings")"
+        PREFIX="$prefix" jq -r '
+          .[] | "::" + .severity
+              + " file=" + (env.PREFIX + .path)
+              + ",line=" + ((.line // 1) | tostring)
+              + ",title=" + (.rule // "archdoc")
+              + "::" + .message
+        ' "$findings"
+
+        echo "findings=$count" >> "$GITHUB_OUTPUT"
+        echo "$count finding(s)" >> "$GITHUB_STEP_SUMMARY"
+        exit $status

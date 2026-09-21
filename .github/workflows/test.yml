@@ -1,0 +1,92 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A superseded run tells you nothing.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Linux only. The platform work belongs to archdochq/setup, which carries a
+  # matrix for it; repeating that here would test the same download twice.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: A repository that lints clean
+        id: clean
+        uses: ./
+        with:
+          path: fixtures/clean
+
+      - name: It found nothing
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "findings=${{ steps.clean.outputs.findings }}"
+          [ "${{ steps.clean.outputs.findings }}" = "0" ]
+
+  # The half that matters: a repository with faults has to fail the job and
+  # annotate, not pass quietly.
+  findings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: broken
+        uses: ./
+        continue-on-error: true
+        with:
+          path: fixtures/broken
+
+      - name: It failed, and counted the findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "outcome=${{ steps.broken.outcome }} findings=${{ steps.broken.outputs.findings }}"
+          [ "${{ steps.broken.outcome }}" = "failure" ]
+          [ "${{ steps.broken.outputs.findings }}" != "0" ]
+
+  # A version asked for is installed whatever is already there, and an archdoc
+  # already present is left alone. Both halves, because either one passing
+  # alone proves nothing about the other.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: archdochq/setup@v1
+        with:
+          version: v0.2.0
+      - name: An explicit version replaces what is there
+        uses: ./
+        with:
+          path: fixtures/clean
+          version: v0.1.0
+      - shell: bash
+        run: |
+          set -euo pipefail
+          archdoc --version
+          [ "$(archdoc --version)" = "v0.1.0" ]
+
+      - name: And with none, what is there is kept
+        uses: ./
+        with:
+          path: fixtures/clean
+      - shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(archdoc --version)" = "v0.1.0" ]
